@@ -42,6 +42,12 @@ func (rr *RR) String() string {
 	}
 }
 
+func (rr *RR) Key() key {
+	return key{rr.Name, rr.Type}
+}
+
+
+
 // ttlString constructs the TTL field of an RR string.
 func ttlString(ttl time.Duration) string {
 	seconds := int(ttl.Seconds())

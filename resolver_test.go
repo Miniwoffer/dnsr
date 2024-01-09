@@ -117,10 +117,10 @@ func TestResolveCtx(t *testing.T) {
 func TestResolveContext(t *testing.T) {
 	r := NewResolver()
 	ctx, cancel := context.WithCancel(context.Background())
-	_, err := r.ResolveContext(ctx, "1.com", "")
+	_, err := r.ResolveContext(ctx, "1.com", "A")
 	st.Expect(t, err, NXDOMAIN)
 	cancel()
-	_, err = r.ResolveContext(ctx, "1.com", "")
+	_, err = r.ResolveContext(ctx, "1.com", "A")
 	st.Expect(t, err, context.Canceled)
 }
 
@@ -136,11 +136,11 @@ func TestResolverCache(t *testing.T) {
 	r.cache.m.Lock()
 	st.Expect(t, len(r.cache.entries), 10)
 	r.cache.m.Unlock()
-	rrs, err := r.ResolveErr("a.com", "")
+	rrs, err := r.ResolveErr("a.com", "A")
 	st.Expect(t, err, NXDOMAIN)
 	st.Expect(t, rrs, (RRs)(nil))
 	r.cache.m.Lock()
-	st.Expect(t, r.cache.entries["a.com"], entry(nil))
+	st.Reject(t, r.cache.entries[key{"a.com.", "A"}], nil)
 	st.Expect(t, len(r.cache.entries), 10)
 	r.cache.m.Unlock()
 }
