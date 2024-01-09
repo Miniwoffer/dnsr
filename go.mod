@@ -1,4 +1,4 @@
-module github.com/domainr/dnsr
+module github.com/miniwoffer/dnsr
 
 require (
 	github.com/miekg/dns v1.1.57
