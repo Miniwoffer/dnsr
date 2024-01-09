@@ -6,88 +6,100 @@ import (
 )
 
 type cache struct {
-	capacity int
-	expire   bool
-	m        sync.RWMutex
-	entries  map[string]entry
+	capacity    int
+	expire      bool
+	m           sync.RWMutex
+	entries     map[key]entry
+	negativeTTL time.Duration
+	ttlMax      *time.Duration
 }
 
-type entry map[RR]struct{}
+type key struct {
+	qname string
+	qtype string
+}
+
+type entry struct {
+	expiry  time.Time
+	rrs RRs
+}
 
 const MinCacheCapacity = 1000
 
 // newCache initializes and returns a new cache instance.
 // Cache capacity defaults to MinCacheCapacity if <= 0.
-func newCache(capacity int, expire bool) *cache {
+func NewCache(capacity int, expire bool, negativeTTL time.Duration, ttlMax *time.Duration) *cache {
 	if capacity <= 0 {
 		capacity = MinCacheCapacity
 	}
+	if ttlMax != nil {
+		// Make a copy of the ttl
+		ttl := *ttlMax
+		ttlMax = &ttl
+	}
+
+
 	return &cache{
 		capacity: capacity,
-		entries:  make(map[string]entry),
+		entries:  make(map[key]entry),
 		expire:   expire,
+		negativeTTL: negativeTTL,
+		ttlMax:   ttlMax,
 	}
 }
 
 // add adds 0 or more DNS records to the resolver cache for a specific
 // domain name and record type. This ensures the cache entry exists, even
 // if empty, for NXDOMAIN responses.
-func (c *cache) add(qname string, rr RR) {
+func (c *cache) add(key key, rrs ...RR) {
+	// Prepare the entry
+	e := entry{
+		rrs:  rrs,
+		expiry: time.Now().Add(c.negativeTTL),
+	}
+	if len(rrs) > 0 {
+		e.expiry = rrs[0].Expiry
+		for _, rr := range rrs {
+			// Its not allowed to mix TTLs in a single responses
+			// but if that happens, the lowest TTL should be used
+			if rr.Expiry.Before(e.expiry) {
+				e.expiry = rr.Expiry
+			}
+		}
+		// Cap the TTL to the maximum allowed
+		if c.ttlMax != nil {
+			max := time.Now().Add(*c.ttlMax)
+			if e.expiry.After(max) {
+				e.expiry = max
+			}
+		}
+	}
 	c.m.Lock()
 	defer c.m.Unlock()
-	c._add(qname, rr)
-}
-
-// addNX adds an NXDOMAIN to the cache.
-// Safe for concurrent usage.
-func (c *cache) addNX(qname string) {
-	c.m.Lock()
-	defer c.m.Unlock()
-	c._addEntry(qname)
+	c._add(key,e)
 }
 
 // _add does NOT lock the mutex so unsafe for concurrent usage.
-func (c *cache) _add(qname string, rr RR) {
-	e, ok := c.entries[qname]
-	if !ok {
+func (c *cache) _add(key key, entry entry) {
+	if len(c.entries) >= c.capacity {
 		c._evict()
 	}
-	if e == nil {
-		c.entries[qname] = make(map[RR]struct{})
-		e = c.entries[qname]
-	}
-	e[rr] = struct{}{}
-}
-
-// _addEntry adds an entry for qname to c.
-// Not safe for concurrent usage.
-func (c *cache) _addEntry(qname string) {
-	_, ok := c.entries[qname]
-	if !ok {
-		c._evict()
-		// For NXDOMAIN responses,
-		// the cache entry is present, but nil.
-		c.entries[qname] = nil
-	}
+	c.entries[key] = entry
 }
 
 // FIXME: better random cache eviction than Go’s random key guarantee?
 // Not safe for concurrent usage.
 func (c *cache) _evict() {
+
 	if len(c.entries) < c.capacity {
 		return
 	}
-
 	// First evict expired entries
 	if c.expire {
 		now := time.Now()
 		for k, e := range c.entries {
-			for rr := range e {
-				if !rr.Expiry.IsZero() && rr.Expiry.Before(now) {
-					delete(e, rr)
-				}
-			}
-			if len(e) == 0 {
+			// Remove expired entries and entries with expiration
+			if e.expiry.Before(now) {
 				delete(c.entries, k)
 			}
 			if len(c.entries) < c.capacity {
@@ -106,32 +118,15 @@ func (c *cache) _evict() {
 }
 
 // get returns a randomly ordered slice of DNS records.
-func (c *cache) get(qname string) RRs {
+func (c *cache) get(key key) RRs {
 	c.m.RLock()
 	defer c.m.RUnlock()
-	e, ok := c.entries[qname]
+	e, ok := c.entries[key]
 	if !ok {
 		return nil
 	}
-	if len(e) == 0 {
-		return emptyRRs
+	if !c.expire || e.expiry.After(time.Now()) {
+		return e.rrs
 	}
-	if c.expire {
-		now := time.Now()
-		rrs := make(RRs, 0, len(e))
-		for rr := range e {
-			if rr.Expiry.IsZero() || rr.Expiry.After(now) {
-				rrs = append(rrs, rr)
-			}
-		}
-		return rrs
-	} else {
-		i := 0
-		rrs := make(RRs, len(e))
-		for rr := range e {
-			rrs[i] = rr
-			i++
-		}
-		return rrs
-	}
+	return nil
 }

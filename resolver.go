@@ -67,24 +67,49 @@ func WithTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithNegativeTTL specifies the TTL for negative cache entries.
+// The default value is 5 minutes.
+func WithNegativeTTL(ttl time.Duration) Option {
+	return func(r *Resolver) {
+		r.negativeTTL = ttl
+	}
+}
+
+// WithTTLMax specifies the maximum TTL for cache entries.
+// The default value is 24 hours.
+func WithTTLMax(ttl time.Duration) Option {
+	return func(r *Resolver) {
+		r.ttlMax = ttl
+	}
+}
+
+
 // Resolver implements a primitive, non-recursive, caching DNS resolver.
 type Resolver struct {
 	dialer   ContextDialer
 	timeout  time.Duration
 	cache    *cache
-	capacity int
-	expire   bool
+
+	// Cache options
+	capacity    int
+	expire      bool
+	negativeTTL time.Duration
+	ttlMax      time.Duration
 }
 
 // NewResolver returns an initialized Resolver with options.
 // By default, the returned Resolver will have cache capacity 0
 // and the default network timeout (Timeout).
 func NewResolver(options ...Option) *Resolver {
-	r := &Resolver{timeout: Timeout}
+	r := &Resolver {
+		timeout: Timeout,
+		negativeTTL: 5 * time.Minute,
+		ttlMax:      24 * time.Hour,
+	}
 	for _, o := range options {
 		o(r)
 	}
-	r.cache = newCache(r.capacity, r.expire)
+	r.cache = NewCache(r.capacity, r.expire, r.negativeTTL, &r.ttlMax)
 	return r
 }
 
@@ -360,7 +385,8 @@ func (r *Resolver) exchangeIP(ctx context.Context, host, ip, qname, qtype string
 			}
 		}
 		if !hasSOA {
-			r.cache.addNX(qname)
+			// Negative cache by inserting a empty RRSet
+			r.cache.add(key{qname,qtype})
 			return nil, NXDOMAIN
 		}
 	} else if rmsg.Rcode != dns.RcodeSuccess {
@@ -405,10 +431,9 @@ func (r *Resolver) resolveCNAMEs(ctx context.Context, qname, qtype string, crrs 
 		}
 		logCNAME(crr.String(), depth)
 		crrs, _ := r.resolve(ctx, crr.Value, qtype, depth)
-		for _, rr := range crrs {
-			r.cache.add(qname, rr)
-			rrs = append(rrs, crr)
-		}
+
+		r.cache.add(key{qname, qtype}, crrs...)
+		rrs = append(rrs, crrs...)
 	}
 	return rrs, nil
 }
@@ -426,7 +451,7 @@ func (r *Resolver) saveDNSRR(host, qname string, drrs []dns.RR) RRs {
 			// fmt.Fprintf(os.Stderr, "Warning: potential poisoning from %s: %s -> %s\n", host, qname, drr.String())
 			continue
 		}
-		r.cache.add(rr.Name, rr)
+		r.cache.add(key{rr.Name, rr.Type}, rr)
 		if rr.Name != qname {
 			continue
 		}
@@ -442,9 +467,9 @@ func (r *Resolver) cacheGet(ctx context.Context, qname, qtype string) (RRs, erro
 		return nil, ctx.Err()
 	default:
 	}
-	any := r.cache.get(qname)
+	any := r.cache.get(key{qname, qtype})
 	if any == nil {
-		any = rootCache.get(qname)
+		any = rootCache.get(key{qname, qtype})
 	}
 	if any == nil {
 		return nil, nil

@@ -13,13 +13,13 @@ var (
 )
 
 func init() {
-	rootCache = newCache(strings.Count(root, "\n"), false)
+	rootCache = NewCache(strings.Count(root, "\n"), false, 0, nil)
 	zp := dns.NewZoneParser(strings.NewReader(root), "", "")
 
 	for drr, ok := zp.Next(); ok; drr, ok = zp.Next() {
 		rr, ok := convertRR(drr, false)
 		if ok {
-			rootCache.add(rr.Name, rr)
+			rootCache.add(key{rr.Name, rr.Type}, rr)
 		}
 	}
 

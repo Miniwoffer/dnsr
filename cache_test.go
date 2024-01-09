@@ -9,45 +9,53 @@ import (
 )
 
 func TestCache(t *testing.T) {
-	c := newCache(100, false)
-	c.addNX("hello.")
+	c := NewCache(100, false, 0, nil)
+
 	rr := RR{Name: "hello.", Type: "A", Value: "1.2.3.4"}
-	c.add("hello.", rr)
-	rrs := c.get("hello.")
+	key := key{rr.Name, rr.Type}
+	c.add(key)
+	c.add(key, rr)
+	rrs := c.get(key)
 	st.Expect(t, len(rrs), 1)
 }
 
 func TestLiveCacheEntry(t *testing.T) {
-	c := newCache(100, true)
-	c.addNX("alive.")
+	c := NewCache(100, true, 0, nil)
+
 	alive := time.Now().Add(time.Minute)
 	rr := RR{Name: "alive.", Type: "A", Value: "1.2.3.4", Expiry: alive}
-	c.add("alive.", rr)
-	rrs := c.get("alive.")
+	key := key{rr.Name, rr.Type}
+	c.add(key)
+	c.add(key, rr)
+	rrs := c.get(key)
 	st.Expect(t, len(rrs), 1)
 }
 
 func TestExpiredCacheEntry(t *testing.T) {
-	c := newCache(100, true)
-	c.addNX("expired.")
+	c := NewCache(100, true, 0, nil)
+
 	expired := time.Now().Add(-time.Minute)
 	rr := RR{Name: "expired.", Type: "A", Value: "1.2.3.4", Expiry: expired}
-	c.add("expired.", rr)
-	rrs := c.get("expired.")
+	key := key{rr.Name, rr.Type}
+	c.add(key)
+
+	c.add(key, rr)
+	rrs := c.get(key)
 	st.Expect(t, len(rrs), 0)
 }
 
 func TestCacheContention(t *testing.T) {
 	k := "expired."
-	c := newCache(10, true)
+	key := key{k, "A"}
+	c := NewCache(10, true, 0, nil)
 	var wg sync.WaitGroup
 	f := func() {
-		rrs := c.get(k)
+		rrs := c.get(key)
 		st.Expect(t, len(rrs), 0)
-		c.addNX(k)
+		c.add(key)
 		expired := time.Now().Add(-time.Minute)
 		rr := RR{Name: k, Type: "A", Value: "1.2.3.4", Expiry: expired}
-		c.add(k, rr)
+		c.add(key, rr)
 		wg.Done()
 	}
 	for i := 0; i < 1000; i++ {
