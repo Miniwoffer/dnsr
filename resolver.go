@@ -193,7 +193,7 @@ func (r *Resolver) resolve(ctx context.Context, qname, qtype string, depth int) 
 		return nil, err
 	}
 	if len(rrs) > 0 {
-		return rrs, nil
+		return r.resolveCNAMEs(ctx, qname, qtype, rrs, depth)
 	}
 	logResolveStart(qname, qtype, depth)
 	start := time.Now()
@@ -202,10 +202,10 @@ func (r *Resolver) resolve(ctx context.Context, qname, qtype string, depth int) 
 	return rrs, err
 }
 
-func (r *Resolver) iterateParents(ctx context.Context, qname, qtype string, depth int) (RRs, error) {
+func (r *Resolver) iterateParents(pctx context.Context, qname, qtype string, depth int) (RRs, error) {
 	chanRRs := make(chan RRs, MaxNameservers)
 	chanErrs := make(chan error, MaxNameservers)
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 	for pname, ok := qname, true; ok; pname, ok = parent(pname) {
 		// If we’re looking for [foo.com,NS], then move on to the parent ([com,NS])
@@ -271,7 +271,7 @@ func (r *Resolver) iterateParents(ctx context.Context, qname, qtype string, dept
 					}
 				}
 				cancel() // stop any other work here before recursing
-				return r.resolveCNAMEs(ctx, qname, qtype, rrs, depth)
+				return r.resolveCNAMEs(pctx, qname, qtype, rrs, depth)
 			case err = <-chanErrs:
 				if err == NXDOMAIN {
 					return nil, err
@@ -447,8 +447,7 @@ func (r *Resolver) resolveCNAMEs(ctx context.Context, qname, qtype string, crrs 
 		}
 		logCNAME(crr.String(), depth)
 		crrs, _ := r.resolve(ctx, crr.Value, qtype, depth)
-
-		r.cache.add(key{qname, qtype}, crrs...)
+		r.cache.add(key{crr.Value, qtype}, crrs...)
 		rrs = append(rrs, crrs...)
 	}
 	return rrs, nil
