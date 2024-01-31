@@ -12,7 +12,7 @@ import (
 
 // DNS Resolution configuration.
 var (
-	Timeout             = 2000 * time.Millisecond
+	Timeout             = 20000 * time.Millisecond
 	TypicalResponseTime = 100 * time.Millisecond
 	MaxRecursion        = 10
 	MaxNameservers      = 2
@@ -235,7 +235,8 @@ func (r *Resolver) iterateParents(pctx context.Context, qname, qtype string, dep
 				return nil, err
 			}
 			if len(rrs) > 0 {
-				return rrs, nil
+				cancel() // stop any other work here before recursing
+				return r.resolveCNAMEs(pctx, qname, qtype, rrs, depth)
 			}
 		}
 
