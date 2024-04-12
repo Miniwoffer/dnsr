@@ -1,9 +1,9 @@
 name: Update
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: "13 8 * * *" # 8:13 AM UTC is 12:13 AM PT
+#on:
+#  workflow_dispatch:
+#  schedule:
+#    - cron: "13 8 * * *" # 8:13 AM UTC is 12:13 AM PT
 
 jobs:
   update:
